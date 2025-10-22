@@ -1,0 +1,53 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Env/secrets
+.env
+.env.*
+!.env.example
+backend/.env
+frontend/.env
+frontend/.env.local
+frontend/.env.*.local
+
+# Node/Vite/Vue
+node_modules/
+dist/
+.vite/
+*.local
+
+# pnpm / yarn / npm logs
+pnpm-lock.yaml
+yarn.lock
+npm-debug.log*
+pnpm-debug.log*
+yarn-error.log*
+
+# TypeScript
+*.tsbuildinfo
+
+# Go
+bin/
+*.exe
+*.test
+*.out
+# Módulos y cache
+**/vendor/
+**/.cache/
+**/coverage/
+
+# Docker
+*.pid
+*.tmp
+tmp/
+# Volúmenes locales
+cockroach-data/
+# Composes
+docker-compose.override.yml
+
+# IDEs/Editor
+.vscode/
+.idea/
+*.code-workspace
+EOF

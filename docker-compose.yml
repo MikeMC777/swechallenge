@@ -1,0 +1,33 @@
+services:
+  crdb:
+    image: cockroachdb/cockroach:v24.1.5
+    command: start-single-node --insecure
+    ports:
+    - "26257:26257"
+    - "8080:8080" # Cockroach Admin UI
+    volumes:
+    - crdb:/cockroach/cockroach-data
+  api:
+    build: ./backend
+    environment:
+    - PORT=8081
+    - DATABASE_URL=postgresql://root@crdb:26257/stocks?sslmode=disable
+    - SOURCE_API_URL=https://api.karenai.click/swechallenge/list
+    - SOURCE_API_TOKEN=${SOURCE_API_TOKEN}
+    depends_on:
+    - crdb
+    ports:
+    - "8081:8081"
+
+
+  web:
+    build: ./frontend
+    environment:
+    - NEXT_PUBLIC_API_URL=http://localhost:8081
+    ports:
+    - "3000:3000"
+    depends_on:
+    - api
+
+volumes:
+  crdb:
