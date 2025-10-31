@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -24,17 +25,68 @@ func (r *Repo) InsertRaw(ctx context.Context, source, pageKey string, payload an
 
 var moneyRE = regexp.MustCompile(`[$,]`)
 
+// parseMoney convierte strings como "$1,234.50", "+$1000.00", "-$12.34" → *float64.
+// Reglas:
+// - Si el string queda sin dígitos luego de limpiar ("" , " ", "$", "+$", "-$"), retorna (nil, nil).
+// - Si hay comas, deben estar bien formadas en miles: d{1,3}(,d{3})* (opcional .decimales).
+// - Si no hay comas, acepta d+(.decimales)?
+// - Acepta signo + o - y símbolo $ en cualquier orden al inicio.
 func parseMoney(s string) (*float64, error) {
-	if strings.TrimSpace(s) == "" {
+	s = strings.TrimSpace(s)
+	if s == "" {
 		return nil, nil
 	}
-	clean := moneyRE.ReplaceAllString(s, "")
-	var f float64
-	_, err := fmt.Sscanf(clean, "%f", &f)
-	if err != nil {
-		return nil, err
+
+	// Regex de validación (antes de normalizar), para detectar comas mal ubicadas.
+	// Permitimos dos formas:
+	//  A) Con comas de miles correctas:  ^[+-]?\$?\d{1,3}(?:,\d{3})*(?:\.\d+)?$
+	//  B) Sin comas:                    ^[+-]?\$?\d+(?:\.\d+)?$
+	reThousands := regexp.MustCompile(`^[+-]?\$?\d{1,3}(?:,\d{3})*(?:\.\d+)?$`)
+	rePlain := regexp.MustCompile(`^[+-]?\$?\d+(?:\.\d+)?$`)
+
+	// Si contiene coma, debe cumplir la variante con miles; si no, la simple.
+	if strings.Contains(s, ",") {
+		if !reThousands.MatchString(s) {
+			return nil, fmt.Errorf("parseMoney: invalid thousands format")
+		}
+	} else {
+		if !rePlain.MatchString(s) {
+			// Puede que sea sólo "$" o "+$" etc. -> tratar como sin dato
+			onlySymbols := strings.Trim(s, "+-$ $")
+			if onlySymbols == "" {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("parseMoney: invalid format")
+		}
 	}
-	return &f, nil
+
+	// Extraer signo manualmente (para soportar +$ y -$)
+	sign := 1.0
+	if strings.HasPrefix(s, "+") {
+		s = s[1:]
+	} else if strings.HasPrefix(s, "-") {
+		sign = -1
+		s = s[1:]
+	}
+
+	// Quitar símbolo $ si está
+	s = strings.TrimPrefix(s, "$")
+	// Quitar comas
+	s = strings.ReplaceAll(s, ",", "")
+	s = strings.TrimSpace(s)
+
+	// Si después de limpiar no quedan dígitos -> sin dato
+	if s == "" {
+		return nil, nil
+	}
+
+	// Parse final
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return nil, fmt.Errorf("parseMoney: %w", err)
+	}
+	v *= sign
+	return &v, nil
 }
 
 func (r *Repo) UpsertAnalystEvent(ctx context.Context, m map[string]any) error {

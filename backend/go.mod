@@ -4,7 +4,10 @@ go 1.23.0
 
 toolchain go1.24.9
 
-require github.com/jackc/pgx/v5 v5.7.6
+require (
+	github.com/DATA-DOG/go-sqlmock v1.5.2
+	github.com/jackc/pgx/v5 v5.7.6
+)
 
 require (
 	github.com/jackc/pgpassfile v1.0.0 // indirect

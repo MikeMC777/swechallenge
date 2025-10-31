@@ -17,10 +17,12 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	json.NewEncoder(w).Encode(v)
 }
 
+// GET /api/stocks
+// Lista de tickers con resumen (para la tabla). Soporta q, sort, dir, limit, offset
 func (s *Server) ListStocks(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("q")
 
-	// Whitelist de columnas permitidas para ORDER BY
+	// Whitelist de columnas válidas para ORDER BY
 	allowed := map[string]bool{
 		"ticker": true, "company": true,
 		"last_action": true, "last_brokerage": true, "last_rating": true,
@@ -28,42 +30,47 @@ func (s *Server) ListStocks(w http.ResponseWriter, r *http.Request) {
 		"raised_30d": true, "lowered_30d": true, "reiterated_30d": true, "initiated_30d": true,
 		"score": true, "updated_at": true,
 	}
+
 	sort := r.URL.Query().Get("sort")
 	if !allowed[sort] {
 		sort = "score"
 	}
+
 	dir := strings.ToUpper(r.URL.Query().Get("dir"))
 	if dir != "ASC" {
 		dir = "DESC"
 	}
+
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
 
-	// Construcción segura de SQL con numeración correcta de placeholders
 	base := `SELECT ticker, company, last_action, last_brokerage, last_rating, last_target, last_time,
-	                raised_30d, lowered_30d, reiterated_30d, initiated_30d, score, rationale, updated_at
-	         FROM tickers_summary`
+                    raised_30d, lowered_30d, reiterated_30d, initiated_30d, score, rationale, updated_at
+             FROM tickers_summary`
+
 	args := []any{}
 	where := ""
 	if q != "" {
 		where = " WHERE ticker ILIKE $1 OR company ILIKE $1 OR last_brokerage ILIKE $1"
 		args = append(args, "%"+q+"%")
 	}
-	// LIMIT/OFFSET deben numerarse en función de cuantos args llevamos
+
+	// Numerar LIMIT/OFFSET según cantidad de args acumulados
 	limIdx := len(args) + 1
 	offIdx := len(args) + 2
 
 	sqlStr := base + where +
 		" ORDER BY " + sort + " " + dir +
 		fmt.Sprintf(" LIMIT $%d OFFSET $%d", limIdx, offIdx)
+
 	args = append(args, limit, offset)
 
 	rows, err := s.DB.Query(sqlStr, args...)
 	if err != nil {
-		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 	defer rows.Close()
@@ -96,9 +103,12 @@ func (s *Server) ListStocks(w http.ResponseWriter, r *http.Request) {
 			out = append(out, it)
 		}
 	}
-	writeJSON(w, 200, map[string]any{"items": out, "limit": limit, "offset": offset})
+
+	writeJSON(w, http.StatusOK, map[string]any{"items": out, "limit": limit, "offset": offset})
 }
 
+// GET /api/stocks/{symbol}
+// Devuelve timeline de eventos del ticker
 func (s *Server) GetStock(w http.ResponseWriter, r *http.Request) {
 	sym := strings.TrimPrefix(r.URL.Path, "/api/stocks/")
 	rows, err := s.DB.Query("SELECT company, action, brokerage, rating_from, rating_to, target_from, target_to, target_delta, event_time FROM analyst_events WHERE ticker=$1 ORDER BY event_time DESC", sym)
@@ -131,6 +141,8 @@ func (s *Server) GetStock(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"ticker": sym, "events": list})
 }
 
+// GET /api/recommendations
+// Devuelve top-N por score (N fijo por simplicidad)
 func (s *Server) Recommend(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.DB.Query(`SELECT ticker, company, score, rationale FROM tickers_summary ORDER BY score DESC LIMIT 5`)
 	if err != nil {
@@ -151,4 +163,18 @@ func (s *Server) Recommend(w http.ResponseWriter, r *http.Request) {
 		list = append(list, o)
 	}
 	writeJSON(w, 200, map[string]any{"items": list})
+}
+
+// POST /api/score/recompute
+// Dispara recomputo de score (stub: solo toca updated_at). Se integrará con score.Scorer.
+func (s *Server) RecomputeScores(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	if _, err := s.DB.Exec(`UPDATE tickers_summary SET score=score, updated_at=now()`); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
