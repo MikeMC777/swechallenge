@@ -50,4 +50,6 @@ docker-compose.override.yml
 .vscode/
 .idea/
 *.code-workspace
-EOF
+frontend/node_modules/
+frontend/.vite/
+frontend/dist/
